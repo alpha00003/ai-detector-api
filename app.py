@@ -7,8 +7,7 @@ app = FastAPI(title="AI Text Detector API")
 
 print("Loading model...")
 classifier = pipeline(
-    "text-classification",
-    model="desklib/ai-text-detector-v1.01",
+    model="Hello-SimpleAI/chatgpt-detector-roberta",
     device=-1
 )
 print("Model loaded!")
