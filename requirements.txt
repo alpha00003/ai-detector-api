@@ -4,3 +4,4 @@ transformers
 fastapi
 uvicorn[standard]
 pydantic
+numpy
