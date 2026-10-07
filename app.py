@@ -1,7 +1,5 @@
 """
 FS AI Tool — Detector + Humanizer + SEO (Render backend)
-Detector: Earlybird-fast + Expanded statistical patterns
-Humanizer: Groq Llama 3.3 + local fallback
 """
 import os
 import re
@@ -67,10 +65,9 @@ class HumanizeReq(BaseModel):
 
 
 # ============================================================
-# DETECTOR DATA — expanded for blog/marketing AI detection
+# DETECTOR DATA — expanded for aggressive detection
 # ============================================================
 AI_VOCAB = [
-    # Classic clichés
     "furthermore", "moreover", "in conclusion", "delve", "tapestry",
     "testament", "crucial", "paramount", "pivotal", "subsequently",
     "nonetheless", "unwavering", "fostering", "beacon", "realm",
@@ -79,7 +76,6 @@ AI_VOCAB = [
     "ever-evolving", "multifaceted", "interplay", "underscore",
     "holistic", "indispensable", "imperative", "testament to",
     "strive to", "navigate", "leverage", "foster",
-    # Marketing/blog AI tells
     "revolutionize", "revolutionized", "revolutionary", "revolutionizing",
     "streamline", "streamlined", "streamlining",
     "seamless", "seamlessly", "seamlessness",
@@ -104,9 +100,9 @@ AI_VOCAB = [
     "sleek", "multipurpose", "multi-purpose",
     "high-powered", "high-performance",
     "genuinely",
-    # Transition/structure tells
     "ultimately", "fundamentally", "essentially", "in essence",
     "when it comes to", "at the end of the day",
+    "gimmicks", "gimmick",
 ]
 
 AI_PHRASES = [
@@ -114,22 +110,23 @@ AI_PHRASES = [
     r"\bgone are the days\b",
     r"\benter the\b",
     r"\blook for (models|ones|options|versions|units) with\b",
-    r"\bkeep these .{0,40} in mind\b",
+    r"\bkeep these .{0,60} in mind\b",
     r"\bbefore hitting\b",
     r"\bif there (is|are) one\b",
     r"\bhere are the (essential|best|top|key|must-have)\b",
     r"\bdesigned to (streamline|enhance|maximize|help|make|keep|transform|provide|deliver)\b",
     r"\bthis (versatile|innovative|powerful|sleek|compact|multipurpose) (unit|device|tool|gadget|appliance)\b",
     r"\bin the (modern|digital|today's) (world|age|era|kitchen|landscape)\b",
-    r"\bnot only .{0,60}? but also\b",
+    r"\bnot only .{0,80}? but also\b",
     r"\bwith the (touch|push|click) of a button\b",
     r"\bhas (revolutionized|transformed|changed|elevated|reshaped)\b",
     r"\beliminates? the need for\b",
-    r"\bdesigned with .{0,40}? in mind\b",
-    r"\btakes? .{0,40}? to the next level\b",
+    r"\bdesigned with .{0,60}? in mind\b",
+    r"\btakes? .{0,60}? to the next level\b",
     r"\bdeserves? a permanent spot\b",
     r"\bthe modern (kitchen|world|era|approach|landscape)\b",
     r"\btransforms? from a chore\b",
+    r"\ba chore into a\b",
     r"\bpermanent spot in your\b",
     r"\bgame of (guesswork|chance)\b",
     r"\binvesting in the right\b",
@@ -137,11 +134,14 @@ AI_PHRASES = [
     r"\bdesigned for (those|people|users) who\b",
     r"\bif you (are|'re) looking (to|for)\b",
     r"\bwhen you (are|'re) (ready|looking)\b",
-    r"\bit's (not|isn't) about .{0,40}? it's about\b",
+    r"\bit's (not|isn't) about .{0,60}? it's about\b",
     r"\bremoving friction from\b",
     r"\bdelicious (home-cooked|home cooked) meals\b",
-    r"\ba (chore|task) into a\b",
-    r"\bseamless (daily|everyday|experience|integration|flow)\b",
+    r"\bseamless (daily|everyday|experience|integration|flow|delight)\b",
+    r"\btransforms? .{0,40}? into a\b",
+    r"\bwith a few (smart|simple|easy)\b",
+    r"\bat your disposal\b",
+    r"\bfrom a chore\b",
 ]
 
 HUMANIZED_PATTERNS = [
@@ -172,7 +172,7 @@ def local_metrics(text: str) -> dict:
 
     lower = text.lower()
     detected = [w for w in AI_VOCAB if w in lower]
-    phrase_hits = [p for p in AI_PHRASES if re.search(p, text, re.IGNORECASE)]
+    phrase_hits = [p for p in AI_PHRASES if re.search(p, text, re.IGNORECASE | re.DOTALL)]
 
     vocab_score = min(60, len(detected) * 6)
     phrase_score = min(60, len(phrase_hits) * 10)
@@ -183,17 +183,17 @@ def local_metrics(text: str) -> dict:
 
     base = min(100, max(0, 20 + burst_score + vocab_score + phrase_score))
 
-    # Hard floors — if many signals, don't let it look human
-    if total_signals >= 12:
-        base = max(base, 92)
-    elif total_signals >= 8:
-        base = max(base, 82)
-    elif total_signals >= 5:
-        base = max(base, 68)
-    elif total_signals >= 3:
-        base = max(base, 52)
+    # Aggressive floors
+    if total_signals >= 10:
+        base = max(base, 95)
+    elif total_signals >= 6:
+        base = max(base, 88)
+    elif total_signals >= 4:
+        base = max(base, 78)
+    elif total_signals >= 2:
+        base = max(base, 65)
     elif total_signals >= 1:
-        base = max(base, 32)
+        base = max(base, 50)
 
     return {
         "burstiness": burst_label,
@@ -213,9 +213,6 @@ def earlybird_predict(text: str) -> Dict[str, float]:
     return {r["label"]: float(r["score"]) for r in rows}
 
 
-# ============================================================
-# HUMANIZER DATA
-# ============================================================
 CLICHE_MAP = [
     (r"\bfurthermore\b", "also"), (r"\bmoreover\b", "also"),
     (r"\bin conclusion\b", "overall"), (r"\bdelve into\b", "look at"),
@@ -438,12 +435,11 @@ async def detect(req: DetectReq, request: Request):
         print("[DETECT] Earlybird failed:", e)
         eb_pct = None
 
-    # Smart weight distribution
     if eb_pct is not None:
-        if local["total_signals"] >= 5:
-            final = round(local["base_score"] * 0.8 + eb_pct * 0.2)
+        if local["total_signals"] >= 4:
+            final = round(local["base_score"] * 0.85 + eb_pct * 0.15)
         elif local["total_signals"] >= 2:
-            final = round(local["base_score"] * 0.65 + eb_pct * 0.35)
+            final = round(local["base_score"] * 0.7 + eb_pct * 0.3)
         else:
             final = round(local["base_score"] * 0.4 + eb_pct * 0.6)
     else:
