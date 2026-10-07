@@ -1,5 +1,7 @@
 """
 FS AI Tool — Detector + Humanizer + SEO (Render backend)
+Detector: Earlybird-fast + Expanded statistical patterns
+Humanizer: Groq Llama 3.3 + local fallback
 """
 import os
 import re
@@ -64,7 +66,11 @@ class HumanizeReq(BaseModel):
     tone: str = "natural"
 
 
+# ============================================================
+# DETECTOR DATA — expanded for blog/marketing AI detection
+# ============================================================
 AI_VOCAB = [
+    # Classic clichés
     "furthermore", "moreover", "in conclusion", "delve", "tapestry",
     "testament", "crucial", "paramount", "pivotal", "subsequently",
     "nonetheless", "unwavering", "fostering", "beacon", "realm",
@@ -72,7 +78,70 @@ AI_VOCAB = [
     "a broad range of", "shed light on", "play a crucial role",
     "ever-evolving", "multifaceted", "interplay", "underscore",
     "holistic", "indispensable", "imperative", "testament to",
-    "strive to", "navigate", "leverage", "foster", "seamlessly",
+    "strive to", "navigate", "leverage", "foster",
+    # Marketing/blog AI tells
+    "revolutionize", "revolutionized", "revolutionary", "revolutionizing",
+    "streamline", "streamlined", "streamlining",
+    "seamless", "seamlessly", "seamlessness",
+    "elevate", "elevated", "elevating", "elevation",
+    "versatile", "versatility",
+    "effortless", "effortlessly", "effortlessness",
+    "maximize", "maximized", "maximizing",
+    "optimize", "optimized", "optimizing",
+    "robust", "cutting-edge", "state-of-the-art",
+    "game-changer", "game changer", "game-changing",
+    "unleash", "unleashing", "unparalleled",
+    "empower", "empowering", "empowered",
+    "transformative", "transformation",
+    "enhance", "enhanced", "enhancing", "enhancement",
+    "boast", "boasts", "boasting",
+    "harness", "harnessing", "harnessed",
+    "cultivate", "cultivating",
+    "tailored", "bespoke", "curated",
+    "intricate", "intricacies",
+    "plethora", "myriad",
+    "innovative", "innovation", "innovate",
+    "sleek", "multipurpose", "multi-purpose",
+    "high-powered", "high-performance",
+    "genuinely",
+    # Transition/structure tells
+    "ultimately", "fundamentally", "essentially", "in essence",
+    "when it comes to", "at the end of the day",
+]
+
+AI_PHRASES = [
+    r"\bwhether you (are|'re) (a|an)\b",
+    r"\bgone are the days\b",
+    r"\benter the\b",
+    r"\blook for (models|ones|options|versions|units) with\b",
+    r"\bkeep these .{0,40} in mind\b",
+    r"\bbefore hitting\b",
+    r"\bif there (is|are) one\b",
+    r"\bhere are the (essential|best|top|key|must-have)\b",
+    r"\bdesigned to (streamline|enhance|maximize|help|make|keep|transform|provide|deliver)\b",
+    r"\bthis (versatile|innovative|powerful|sleek|compact|multipurpose) (unit|device|tool|gadget|appliance)\b",
+    r"\bin the (modern|digital|today's) (world|age|era|kitchen|landscape)\b",
+    r"\bnot only .{0,60}? but also\b",
+    r"\bwith the (touch|push|click) of a button\b",
+    r"\bhas (revolutionized|transformed|changed|elevated|reshaped)\b",
+    r"\beliminates? the need for\b",
+    r"\bdesigned with .{0,40}? in mind\b",
+    r"\btakes? .{0,40}? to the next level\b",
+    r"\bdeserves? a permanent spot\b",
+    r"\bthe modern (kitchen|world|era|approach|landscape)\b",
+    r"\btransforms? from a chore\b",
+    r"\bpermanent spot in your\b",
+    r"\bgame of (guesswork|chance)\b",
+    r"\binvesting in the right\b",
+    r"\btoday's (smart|modern|advanced|innovative)\b",
+    r"\bdesigned for (those|people|users) who\b",
+    r"\bif you (are|'re) looking (to|for)\b",
+    r"\bwhen you (are|'re) (ready|looking)\b",
+    r"\bit's (not|isn't) about .{0,40}? it's about\b",
+    r"\bremoving friction from\b",
+    r"\bdelicious (home-cooked|home cooked) meals\b",
+    r"\ba (chore|task) into a\b",
+    r"\bseamless (daily|everyday|experience|integration|flow)\b",
 ]
 
 HUMANIZED_PATTERNS = [
@@ -95,23 +164,44 @@ def local_metrics(text: str) -> dict:
     stddev = math.sqrt(variance)
 
     if stddev < 3.2:
-        burst_label, burst_score = "Low (AI Symmetrical)", 45
+        burst_label, burst_score = "Low (AI Symmetrical)", 30
     elif stddev > 6.5:
-        burst_label, burst_score = "High (Human Irregular)", -25
+        burst_label, burst_score = "High (Human Irregular)", -20
     else:
         burst_label, burst_score = "Normal", 0
 
     lower = text.lower()
     detected = [w for w in AI_VOCAB if w in lower]
-    vocab_score = min(50, len(detected) * 12)
+    phrase_hits = [p for p in AI_PHRASES if re.search(p, text, re.IGNORECASE)]
+
+    vocab_score = min(60, len(detected) * 6)
+    phrase_score = min(60, len(phrase_hits) * 10)
+
+    total_signals = len(detected) + len(phrase_hits)
+
     humanized_triggers = sum(1 for p in HUMANIZED_PATTERNS if re.search(p, text, re.IGNORECASE))
-    base = min(100, max(0, 25 + burst_score + vocab_score))
+
+    base = min(100, max(0, 20 + burst_score + vocab_score + phrase_score))
+
+    # Hard floors — if many signals, don't let it look human
+    if total_signals >= 12:
+        base = max(base, 92)
+    elif total_signals >= 8:
+        base = max(base, 82)
+    elif total_signals >= 5:
+        base = max(base, 68)
+    elif total_signals >= 3:
+        base = max(base, 52)
+    elif total_signals >= 1:
+        base = max(base, 32)
 
     return {
         "burstiness": burst_label,
         "perplexity": "Low" if stddev < 4 else "High",
         "variance": round(stddev, 1),
         "detected": detected,
+        "phrases_detected": phrase_hits,
+        "total_signals": total_signals,
         "humanized_triggers": humanized_triggers,
         "base_score": base,
     }
@@ -123,6 +213,9 @@ def earlybird_predict(text: str) -> Dict[str, float]:
     return {r["label"]: float(r["score"]) for r in rows}
 
 
+# ============================================================
+# HUMANIZER DATA
+# ============================================================
 CLICHE_MAP = [
     (r"\bfurthermore\b", "also"), (r"\bmoreover\b", "also"),
     (r"\bin conclusion\b", "overall"), (r"\bdelve into\b", "look at"),
@@ -212,8 +305,8 @@ CRITICAL RULES:
 2. VARY SENTENCE LENGTH dramatically. Mix 3-6 word sentences with 15-25 word ones.
 3. VARY SENTENCE OPENINGS. Do not start consecutive sentences the same way.
 4. USE CONTRACTIONS: don't, it's, you'll, we're, that's, can't.
-5. CUT AI CLICHÉS: furthermore, moreover, delve, tapestry, testament, crucial, pivotal, leverage, navigate, foster, underscore, holistic, multifaceted, seamlessly, realm, beacon, paramount.
-6. KILL these: "not only X but also Y", "it is important to note", "in today's world", "in the realm of", "plays a vital role", "a testament to".
+5. CUT AI CLICHÉS: furthermore, moreover, delve, tapestry, testament, crucial, pivotal, leverage, navigate, foster, underscore, holistic, multifaceted, seamlessly, realm, beacon, paramount, streamline, elevate, revolutionize, versatile, effortless.
+6. KILL these: "not only X but also Y", "it is important to note", "in today's world", "in the realm of", "plays a vital role", "a testament to", "gone are the days", "enter the".
 7. NO preamble. No "Here is the rewritten text". No quotes around output.
 8. Do NOT add headings, bold, or bullets unless the original had them.
 9. Keep names, numbers, URLs, code, and technical terms exactly.
@@ -345,7 +438,17 @@ async def detect(req: DetectReq, request: Request):
         print("[DETECT] Earlybird failed:", e)
         eb_pct = None
 
-    final = round(local["base_score"] * 0.4 + eb_pct * 0.6) if eb_pct is not None else local["base_score"]
+    # Smart weight distribution
+    if eb_pct is not None:
+        if local["total_signals"] >= 5:
+            final = round(local["base_score"] * 0.8 + eb_pct * 0.2)
+        elif local["total_signals"] >= 2:
+            final = round(local["base_score"] * 0.65 + eb_pct * 0.35)
+        else:
+            final = round(local["base_score"] * 0.4 + eb_pct * 0.6)
+    else:
+        final = local["base_score"]
+
     is_humanized = local["humanized_triggers"] > 0
 
     if is_humanized and final > 25:
@@ -373,9 +476,11 @@ async def detect(req: DetectReq, request: Request):
             "perplexity": local["perplexity"],
             "sentenceVariance": local["variance"],
             "aiPhrasesFound": local["detected"],
+            "phrasePatternsFound": len(local["phrases_detected"]),
+            "totalSignals": local["total_signals"],
             "earlybirdScore": eb_pct,
         },
-        "source": "Earlybird-fast + Statistical (Render)",
+        "source": "Earlybird-fast + Expanded Statistical (Render)",
         "wordCount": wc,
     }
 
