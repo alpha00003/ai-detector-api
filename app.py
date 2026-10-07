@@ -65,7 +65,7 @@ class HumanizeReq(BaseModel):
 
 
 # ============================================================
-# DETECTOR DATA — expanded for aggressive detection
+# DETECTOR DATA
 # ============================================================
 AI_VOCAB = [
     "furthermore", "moreover", "in conclusion", "delve", "tapestry",
@@ -144,12 +144,6 @@ AI_PHRASES = [
     r"\bfrom a chore\b",
 ]
 
-HUMANIZED_PATTERNS = [
-    r"\b(basically|honestly|literally|frankly)\b.*?\b(furthermore|moreover|crucial)\b",
-    r"[,;]\s*(and|but|or|so)\s*[,;]",
-    r"\b(you know|i mean|look|here is the thing)\b",
-]
-
 
 def word_count(text: str) -> int:
     return len(re.findall(r"\S+", text))
@@ -179,11 +173,8 @@ def local_metrics(text: str) -> dict:
 
     total_signals = len(detected) + len(phrase_hits)
 
-    humanized_triggers = sum(1 for p in HUMANIZED_PATTERNS if re.search(p, text, re.IGNORECASE))
-
     base = min(100, max(0, 20 + burst_score + vocab_score + phrase_score))
 
-    # Aggressive floors
     if total_signals >= 10:
         base = max(base, 95)
     elif total_signals >= 6:
@@ -202,7 +193,6 @@ def local_metrics(text: str) -> dict:
         "detected": detected,
         "phrases_detected": phrase_hits,
         "total_signals": total_signals,
-        "humanized_triggers": humanized_triggers,
         "base_score": base,
     }
 
@@ -437,34 +427,30 @@ async def detect(req: DetectReq, request: Request):
 
     if eb_pct is not None:
         if local["total_signals"] >= 4:
-            final = round(local["base_score"] * 0.85 + eb_pct * 0.15)
+            final = round(local["base_score"] * 0.9 + eb_pct * 0.1)
         elif local["total_signals"] >= 2:
-            final = round(local["base_score"] * 0.7 + eb_pct * 0.3)
+            final = round(local["base_score"] * 0.75 + eb_pct * 0.25)
         else:
             final = round(local["base_score"] * 0.4 + eb_pct * 0.6)
     else:
         final = local["base_score"]
 
-    is_humanized = local["humanized_triggers"] > 0
-
-    if is_humanized and final > 25:
-        verdict = "Humanized AI Content"
-        humanized_pct = min(88, max(52, final + 15))
-        ai_pct = max(5, 100 - humanized_pct - 10)
-        human_pct = max(0, 100 - ai_pct - humanized_pct)
-    elif final >= 50:
+    # Simple, direct verdict — no more confusing "humanized" branch
+    if final >= 60:
         verdict = "AI-Generated"
-        ai_pct, human_pct, humanized_pct = final, 100 - final, 0
+    elif final >= 35:
+        verdict = "Mixed / Uncertain"
     else:
-        verdict = "Pure Human-Written"
-        ai_pct, human_pct, humanized_pct = final, 100 - final, 0
+        verdict = "Human-Written"
+
+    ai_pct = final
+    human_pct = 100 - final
 
     return {
         "verdict": verdict,
         "aiPercent": max(0, min(100, ai_pct)),
         "scores": {
             "aiPercent": max(0, min(100, ai_pct)),
-            "humanizedPercent": max(0, min(100, humanized_pct)),
             "humanPercent": max(0, min(100, human_pct)),
         },
         "metrics": {
@@ -476,7 +462,7 @@ async def detect(req: DetectReq, request: Request):
             "totalSignals": local["total_signals"],
             "earlybirdScore": eb_pct,
         },
-        "source": "Earlybird-fast + Expanded Statistical (Render)",
+        "source": "Earlybird + Expanded Statistical (Render)",
         "wordCount": wc,
     }
 
