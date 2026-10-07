@@ -1,6 +1,7 @@
 """
-FS AI Tool — Detector + Humanizer + SEO (minimal, high-accuracy)
-Model: rasbt/ai-text-detector-distilbert (99.74% accuracy)
+FS AI Tool — Detector + Humanizer + SEO
+Model: rasbt/ai-text-detector-distilbert
+Groq: openai/gpt-oss-120b
 """
 import os, re, time, httpx
 from typing import Dict
@@ -13,7 +14,7 @@ from transformers import pipeline
 MODEL_ID = os.environ.get("MODEL_ID", "rasbt/ai-text-detector-distilbert")
 GROQ_API_KEY = os.environ.get("GROQ_API_KEY", "").strip()
 GROQ_URL = "https://api.groq.com/openai/v1/chat/completions"
-GROQ_MODEL = "llama-3.3-70b-versatile"
+GROQ_MODEL = "openai/gpt-oss-120b"
 MAX_CHARS = 8000
 
 print("[BOOT] Loading:", MODEL_ID)
@@ -87,7 +88,7 @@ async def detect(req: D, request: Request):
 
 CLICHES = [
     (r"\bfurthermore\b","also"),(r"\bmoreover\b","also"),(r"\bin conclusion\b","overall"),
-    (r"\bdelve\b","explore"),(r"\btapestry\b","mix"),(r"\btestament to\b","shows"),
+    (r"\bdelve\b","explore"),(r"\btestament to\b","shows"),
     (r"\butilize\b","use"),(r"\badditionally\b","also"),(r"\bconsequently\b","so"),
     (r"\bsubsequently\b","then"),(r"\bit is important to note that\b","keep in mind"),
     (r"\bseamlessly\b","smoothly"),(r"\bmeticulously\b","carefully"),(r"\bmultifaceted\b","complex"),
@@ -95,6 +96,8 @@ CLICHES = [
     (r"\bthus\b","so"),(r"\bhence\b","so"),(r"\bleverage\b","use"),
     (r"\bfacilitate\b","help"),(r"\bcommence\b","start"),(r"\bever-evolving\b","changing"),
     (r"\bstrive to\b","try to"),(r"\bmyriad of\b","many"),(r"\bplethora of\b","many"),
+    (r"\bstreamline\b","simplify"),(r"\belevate\b","lift"),(r"\brevolutionize\b","change"),
+    (r"\bversatile\b","flexible"),(r"\beffortless\b","easy"),
 ]
 
 def clean(t, tone):
@@ -143,19 +146,18 @@ async def humanize(req: H):
         "natural": "Fluent speaker. Vary rhythm."
     }
     kw = f'- Weave "{keyword}" in naturally 2-3 times.' if keyword else ""
-    system = f"""You rewrite AI text like a real person wrote it.
+    system = f"""You rewrite AI text to sound human. You MUST return a rewritten version.
 
 RULES:
-1. Preserve every fact. Never invent anything.
-2. Vary sentence length. Mix 3-6 word sentences with 15-25 word ones.
+1. Preserve EVERY fact. Never invent.
+2. Vary sentence length: mix 3-6 word sentences with 15-25 word ones.
 3. Vary openings.
-4. Use contractions: don't, it's, you'll.
-5. Cut AI clichés: furthermore, moreover, delve, tapestry, crucial, leverage, foster, underscore, holistic, seamlessly, realm, beacon, paramount, streamline, elevate, revolutionize.
-6. Kill: "not only X but also", "in today's world", "gone are the days", "enter the".
+4. Use contractions: don't, it's, you'll, we're, can't, that's.
+5. Kill AI clichés: furthermore, moreover, delve, tapestry, crucial, leverage, foster, underscore, holistic, seamlessly, realm, beacon, paramount, streamline, elevate, revolutionize, versatile, effortless, maximize, optimize, cutting-edge, unleash, empower, transformative, enhance, harness, tailored, intricate, plethora, myriad, innovative, sleek, genuinely, ultimately, fundamentally.
+6. Kill: "not only X but also Y", "in today's world", "gone are the days", "enter the", "if there is one".
 7. No preamble. No quotes. No headings.
 8. Keep names, numbers, URLs exactly.
-9. Prose only.
-10. Fragments fine. NO typos.
+9. Prose only. Fragments fine. NO typos.
 
 Tone: {tone_map[tone]}
 {kw}
@@ -163,17 +165,17 @@ Tone: {tone_map[tone]}
 Output ONLY rewritten text."""
 
     try:
-        async with httpx.AsyncClient(timeout=45.0) as c:
+        async with httpx.AsyncClient(timeout=50.0) as c:
             r = await c.post(GROQ_URL,
                 headers={"Authorization": f"Bearer {GROQ_API_KEY}", "Content-Type": "application/json"},
                 json={
                     "model": GROQ_MODEL,
                     "messages": [{"role":"system","content":system},{"role":"user","content":f"Rewrite:\n\n{text}"}],
                     "max_tokens": min(4500, max(900, len(text.split()) * 3)),
-                    "temperature": 0.88, "top_p": 0.95
+                    "temperature": 0.9, "top_p": 0.95
                 })
         if r.status_code != 200:
-            raise Exception(f"Groq {r.status_code}")
+            raise Exception(f"Groq {r.status_code}: {r.text[:150]}")
         raw = r.json()["choices"][0]["message"]["content"].strip()
         final = clean(strip_pre(raw), tone)
         engine = "groq"
@@ -191,7 +193,7 @@ Output ONLY rewritten text."""
 
 @app.get("/")
 def health():
-    return {"status": "ok", "model": MODEL_ID, "groq": bool(GROQ_API_KEY)}
+    return {"status": "ok", "model": MODEL_ID, "groq": bool(GROQ_API_KEY), "groq_model": GROQ_MODEL}
 
 
 @app.post("/predict")
