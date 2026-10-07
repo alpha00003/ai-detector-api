@@ -11,7 +11,8 @@ WORKDIR /app
 COPY --chown=user requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-RUN python -c "from transformers import pipeline; pipeline('text-classification', model='noumenon-labs/Earlybird-fast')"
+# Naya model build time pe download
+RUN python -c "from transformers import pipeline; pipeline('text-classification', model='rasbt/ai-text-detector-distilbert')"
 
 COPY --chown=user app.py .
 
