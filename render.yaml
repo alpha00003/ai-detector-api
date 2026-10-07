@@ -2,6 +2,16 @@ services:
   - type: web
     name: ai-detector-api
     env: python
+    plan: free
+    region: singapore
     buildCommand: pip install -r requirements.txt
     startCommand: uvicorn app:app --host 0.0.0.0 --port $PORT
-    plan: free
+    envVars:
+      - key: GROQ_API_KEY
+        sync: false
+      - key: API_KEY
+        sync: false
+      - key: MODEL_ID
+        value: noumenon-labs/Earlybird-fast
+      - key: PYTHONUNBUFFERED
+        value: "1"
